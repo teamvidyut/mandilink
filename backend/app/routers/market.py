@@ -14,7 +14,7 @@ from ..lang import CROP_DISPLAY, CROPS, crop_name
 from ..models import Deal, Listing, Photo, Review, User
 from ..nexconn import MSG_NOTICE, nexconn
 from ..security import current_user
-from ..services import BOT_ID, deal_card, log_event, new_id, now, open_deal, post_deal_card, receipt, trust, trust_many
+from ..services import BOT_ID, deal_card, log_event, new_id, now, open_deal, post_deal_card, receipt, same_world, trust, trust_many, world_filter
 
 router = APIRouter(prefix="/api", tags=["market"])
 
@@ -93,7 +93,7 @@ async def listings(
     if mine:
         q = q.where(Listing.seller_id == user.id)
     else:
-        q = q.where(Listing.status == "active")
+        q = q.where(Listing.status == "active", world_filter(Listing.seller_id, user.id))
     if crop:
         q = q.where(Listing.crop == crop)
     order = {
@@ -159,6 +159,8 @@ async def enquire(listing_id: int, user: User = Depends(current_user), session: 
         raise HTTPException(404, "This listing is no longer available")
     if li.seller_id == user.id:
         raise HTTPException(400, "This is your own listing")
+    if not same_world(user.id, li.seller_id):
+        raise HTTPException(404, "This listing is no longer available")
     info = await mandi.get_price(li.crop)
     deal = await open_deal(session, user, li, info.to_dict() if info else None)
     return {"dealId": deal.id}

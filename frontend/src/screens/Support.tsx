@@ -6,7 +6,7 @@ import { Avatar, Icon } from '../components/ui';
 import ChatRoom from './ChatRoom';
 
 export default function Support() {
-  const { t, lang, lastMessages, toast, refreshConversations } = useStore();
+  const { t, lang, me, lastMessages, toast, refreshConversations } = useStore();
   const [tickets, setTickets] = useState<Ticket[] | null>(null);
   const [selected, setSelected] = useState<Ticket | null>(null);
   const [filter, setFilter] = useState<'active' | 'resolved'>('active');
@@ -64,6 +64,7 @@ export default function Support() {
             <button className={filter === 'resolved' ? 'on' : ''} onClick={() => setFilter('resolved')}>{t.resolved}</button>
           </div>
         </header>
+        {me?.demo && <p className="demo-desk-note">{t.demoDesk}</p>}
         {tickets && visible.length === 0 && <p className="empty small">{t.noTickets}</p>}
         <ul className="ticket-list">
           {visible.map((tk) => (

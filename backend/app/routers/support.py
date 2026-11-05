@@ -13,7 +13,7 @@ from ..db import get_session
 from ..lang import LANG_NAMES, crop_name, nfc, rx
 from ..models import BuyRequest, Deal, Event, Feedback, Listing, Review, Ticket, User
 from ..security import current_user, require_agent
-from ..services import claim_ticket, resolve_ticket, trust
+from ..services import DEMO_AGENT_ID, claim_ticket, is_demo_id, resolve_ticket, trust
 
 router = APIRouter(prefix="/api", tags=["support"])
 
@@ -40,9 +40,20 @@ def _ticket_out(session: Session, t: Ticket) -> dict:
     }
 
 
+def _visible_ticket(session: Session, ticket_id: int, agent: User) -> Ticket:
+    """The public demo desk may only open demo users' tickets; others look like 404."""
+    t = session.get(Ticket, ticket_id)
+    if not t or (agent.id == DEMO_AGENT_ID and not is_demo_id(t.user_id)):
+        raise HTTPException(404, "Ticket not found")
+    return t
+
+
 @router.get("/support/tickets")
 def tickets(agent: User = Depends(require_agent), session: Session = Depends(get_session)):
-    rows = session.exec(select(Ticket).order_by(col(Ticket.created_at).desc()).limit(100)).all()
+    q = select(Ticket)
+    if agent.id == DEMO_AGENT_ID:
+        q = q.where(col(Ticket.user_id).startswith("u_demo"))
+    rows = session.exec(q.order_by(col(Ticket.created_at).desc()).limit(100)).all()
     order = {"open": 0, "assigned": 1, "resolved": 2}
     rows = sorted(rows, key=lambda t: (order.get(t.status, 3), t.priority != "high", -t.created_at.timestamp()))
     return [_ticket_out(session, t) for t in rows]
@@ -50,9 +61,7 @@ def tickets(agent: User = Depends(require_agent), session: Session = Depends(get
 
 @router.post("/support/tickets/{ticket_id}/claim")
 async def claim(ticket_id: int, agent: User = Depends(require_agent), session: Session = Depends(get_session)):
-    t = session.get(Ticket, ticket_id)
-    if not t:
-        raise HTTPException(404, "Ticket not found")
+    t = _visible_ticket(session, ticket_id, agent)
     if t.agent_id and t.agent_id != agent.id:
         raise HTTPException(409, "Already claimed by another agent")
     await claim_ticket(session, t, agent)
@@ -61,8 +70,8 @@ async def claim(ticket_id: int, agent: User = Depends(require_agent), session: S
 
 @router.post("/support/tickets/{ticket_id}/resolve")
 async def resolve(ticket_id: int, agent: User = Depends(require_agent), session: Session = Depends(get_session)):
-    t = session.get(Ticket, ticket_id)
-    if not t or t.agent_id != agent.id:
+    t = _visible_ticket(session, ticket_id, agent)
+    if t.agent_id != agent.id:
         raise HTTPException(404, "Ticket not found")
     await resolve_ticket(session, t, agent)
     return _ticket_out(session, t)
@@ -89,9 +98,7 @@ _PLAYBOOK = {
 async def brief(ticket_id: int, agent: User = Depends(require_agent), session: Session = Depends(get_session)):
     """AI case brief for the agent: who, what, the deal facts, fair price and a
     suggested next step. Deterministic facts; an LLM (if set) only rewords."""
-    t = session.get(Ticket, ticket_id)
-    if not t:
-        raise HTTPException(404, "Ticket not found")
+    t = _visible_ticket(session, ticket_id, agent)
     owner = session.get(User, t.user_id)
     text = nfc(f"{t.reason} {t.summary}")
     category = next((name for name, rx in _CATEGORIES if rx.search(text)), "other")
@@ -149,7 +156,7 @@ def metrics(session: Session = Depends(get_session)):
     week = now - timedelta(days=7)
     # Demo accounts (ids "u_demo_*") never count as traction.
     real_user = ~col(User.id).startswith("u_demo")
-    real_event = ~col(Event.user_id).startswith("u_demo")
+    real_event = ~col(Event.user_id).startswith("u_demo") & (Event.user_id != DEMO_AGENT_ID)
 
     # Few grouped queries instead of ~50 small ones (the database may be far from the server).
     by_kind = dict(session.exec(

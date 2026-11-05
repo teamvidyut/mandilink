@@ -11,7 +11,7 @@ from ..db import get_session
 from ..models import User
 from ..nexconn import NexconnError, nexconn
 from ..security import create_session_token, current_user, hash_pin, verify_pin
-from ..services import join_default_rooms, log_event, new_id, now
+from ..services import is_demo_id, join_default_rooms, log_event, new_id, now
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -51,7 +51,7 @@ class ProfileIn(BaseModel):
 
 def user_out(u: User) -> dict:
     return {"id": u.id, "name": u.name, "role": u.role, "language": u.language, "district": u.district,
-            "phone": u.phone[-4:].rjust(10, "•"), "avatarUrl": u.avatar_url}
+            "phone": u.phone[-4:].rjust(10, "•"), "avatarUrl": u.avatar_url, "demo": is_demo_id(u.id)}
 
 
 async def _session_payload(session: Session, user: User) -> dict:

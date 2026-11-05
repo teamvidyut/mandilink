@@ -17,6 +17,29 @@ from .security import hash_pin
 log = logging.getLogger("mandilink.services")
 
 BOT_ID = "mandi-mitra"
+
+# Public demo accounts (for judges). They live in their own "demo world": they only see and
+# trade with other demo accounts, and the demo support desk only sees demo users' tickets,
+# so nobody can read or contact real users through a public demo login.
+DEMO_PREFIX = "u_demo"
+DEMO_AGENT_ID = "agent-riya"
+DEMO_AGENT_PHONE = "9000000000"
+DEMO_AGENT_PIN = "2468"
+REAL_AGENT_ID = "agent-main"
+
+
+def is_demo_id(user_id: str | None) -> bool:
+    return bool(user_id) and (user_id.startswith(DEMO_PREFIX) or user_id == DEMO_AGENT_ID)
+
+
+def same_world(a: str | None, b: str | None) -> bool:
+    return is_demo_id(a) == is_demo_id(b)
+
+
+def world_filter(column, viewer_id: str):
+    """SQL condition: rows whose user column is in the viewer's world (demo or real)."""
+    return col(column).startswith(DEMO_PREFIX) if is_demo_id(viewer_id) else ~col(column).startswith(DEMO_PREFIX)
+
 BOT_NAME = "Mandi Mitra (AI)"
 BOT_AVATAR = ""
 
@@ -58,12 +81,28 @@ async def bootstrap(session: Session) -> None:
     except Exception as exc:  # noqa: BLE001
         log.error("Could not register bot with Nexconn: %s", exc)
 
-    agent = session.exec(select(User).where(User.phone == "9000000000")).first()
+    agent = session.exec(select(User).where(User.phone == DEMO_AGENT_PHONE)).first()
     if agent is None:
-        agent = User(id="agent-riya", name="Riya · MandiLink Support", phone="9000000000",
-                     pin_hash=hash_pin(s.support_agent_pin), role="agent", language="en")
+        agent = User(id=DEMO_AGENT_ID, name="Riya · MandiLink Support", phone=DEMO_AGENT_PHONE,
+                     pin_hash=hash_pin(DEMO_AGENT_PIN), role="agent", language="en")
         session.add(agent)
         session.commit()
+
+    # Private agent for real users' tickets (phone + PIN only in the server environment).
+    phone = "".join(ch for ch in s.support_agent_phone if ch.isdigit())[-10:]
+    if phone and len(s.support_agent_pin) >= 6 and s.support_agent_pin.isdigit() and phone != DEMO_AGENT_PHONE:
+        real = session.get(User, REAL_AGENT_ID)
+        if real is None:
+            session.add(User(id=REAL_AGENT_ID, name="MandiLink Support", phone=phone,
+                             pin_hash=hash_pin(s.support_agent_pin), role="agent", language="en"))
+        else:
+            from .security import verify_pin
+            if real.phone != phone or not verify_pin(s.support_agent_pin, real.pin_hash):
+                real.phone, real.pin_hash = phone, hash_pin(s.support_agent_pin)
+                session.add(real)
+        session.commit()
+    elif s.support_agent_phone or s.support_agent_pin:
+        log.warning("SUPPORT_AGENT_PHONE/SUPPORT_AGENT_PIN ignored: need a 10-digit phone and a PIN of 6+ digits")
 
     for base_id, name, topic, emoji in ROOMS:
         rid = channel_id(base_id)
@@ -220,7 +259,7 @@ async def notify_request(session: Session, req: BuyRequest, buyer: User) -> int:
     """Ping matching farmers through Nexconn direct messages, each in their own
     language: first farmers already selling this crop, then nearby farmers."""
     sellers = {li.seller_id for li in session.exec(select(Listing).where(Listing.crop == req.crop)).all()}
-    q = select(User).where(User.role == "farmer")
+    q = select(User).where(User.role == "farmer", world_filter(User.id, buyer.id))
     farmers = [f for f in session.exec(q).all() if f.id in sellers or (req.district and f.district.lower() == req.district.lower())]
     if not farmers:
         farmers = list(session.exec(q.limit(50)).all())
@@ -261,7 +300,9 @@ async def escalate(session: Session, user: User, reason: str, priority: str = "n
                              {"kind": "ticket_opened", "ticketId": ticket.id, "priority": priority},
                              push_content="Connecting you to a support agent")
     # Real-time ping to every support agent through Nexconn direct messages.
-    agents = session.exec(select(User).where(User.role == "agent")).all()
+    # Demo desk only hears about demo users' tickets; the private desk hears about all.
+    agents = [a for a in session.exec(select(User).where(User.role == "agent")).all()
+              if a.id != DEMO_AGENT_ID or is_demo_id(user.id)]
     if agents:
         await nexconn.send_direct(
             BOT_ID, [a.id for a in agents], TEXT,
@@ -306,7 +347,8 @@ async def post_deal_card(deal: Deal, listing: Listing) -> None:
 
 
 __all__ = [
-    "trust", "trust_many", "receipt", "notify_request",
+    "trust", "trust_many", "receipt", "notify_request", "is_demo_id", "same_world", "world_filter",
+    "DEMO_AGENT_ID", "REAL_AGENT_ID",
     "BOT_ID", "GROUP", "bootstrap", "join_default_rooms", "open_deal", "escalate", "claim_ticket",
     "resolve_ticket", "deal_card", "post_deal_card", "log_event", "listing_card", "new_id",
 ]

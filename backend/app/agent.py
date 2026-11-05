@@ -154,7 +154,9 @@ def _session(config: RunnableConfig) -> Session:
 
 async def listings_tool(state: AgentState, config: RunnableConfig) -> AgentState:
     s = _session(config)
-    q = select(Listing).where(Listing.status == "active")
+    from .services import world_filter  # local import: services imports this module's callers
+
+    q = select(Listing).where(Listing.status == "active", world_filter(Listing.seller_id, state.get("user_id") or ""))
     if state.get("crop"):
         q = q.where(Listing.crop == state["crop"])
     rows = s.exec(q.order_by(Listing.price_per_kg).limit(3)).all()  # type: ignore[arg-type]

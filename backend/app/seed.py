@@ -57,7 +57,7 @@ async def main() -> None:
     print("Seeded demo data. Demo PIN for all demo accounts: 1234")
     for _, name, phone, role, lang, _ in DEMO:
         print(f"  {role:7} {phone}  {name}  [{lang}]")
-    print("  agent   9000000000  Riya · MandiLink Support  (PIN = SUPPORT_AGENT_PIN, default 2468)")
+    print("  agent   9000000000  Riya · MandiLink Support  (demo desk, PIN 2468: sees demo tickets only)")
 
 
 if __name__ == "__main__":

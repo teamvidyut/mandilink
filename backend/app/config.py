@@ -51,7 +51,10 @@ class Settings(BaseSettings):
     datagov_resource_id: str = "9ef84268-d588-465a-a308-a864a43d0070"
 
     # --- Support desk bootstrap ---
-    support_agent_pin: str = "2468"
+    # Private (real) support agent. Created only when both are set and the PIN has 6+ digits.
+    # The public demo desk (9000000000 / 2468) only ever sees demo accounts' tickets.
+    support_agent_phone: str = ""
+    support_agent_pin: str = ""
 
     @property
     def nexconn_enabled(self) -> bool:

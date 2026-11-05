@@ -435,3 +435,77 @@ def test_existing_nexconn_group_is_reused_and_namespace_applied(monkeypatch):
     assert services.channel_id("deal_1_u_demo_buyer") == "deal_1_u_demo_buyer-live"
     monkeypatch.setattr(get_settings(), "channel_namespace", "")
     assert services.channel_id("room-veg-kolkata") == "room-veg-kolkata"
+
+
+def _register(client, phone, role, name="Real User", lang="bn"):
+    r = client.post("/api/auth/register", json={"name": name, "phone": phone, "pin": "5555", "role": role,
+                                                "language": lang, "district": "Bankura"})
+    if r.status_code == 409:
+        return login(client, phone, "5555")
+    assert r.status_code == 200, r.text
+    d = r.json()
+    return {"Authorization": f"Bearer {d['session']}"}, d
+
+
+def test_demo_desk_only_sees_demo_tickets_and_private_desk_sees_all(client, monkeypatch):
+    from sqlmodel import Session
+    from app import services
+    from app.config import get_settings
+    from app.db import engine
+
+    hr, real = _register(client, "9123400001", "buyer", "Real Buyer")
+    real_ticket = client.post("/api/support/request", headers=hr, json={"reason": "My payment is stuck"}).json()["ticketId"]
+    ha, _ = login(client, "9000000000", "2468")
+    ids = [t["id"] for t in client.get("/api/support/tickets", headers=ha).json()]
+    assert real_ticket not in ids and ids  # demo desk still has demo tickets
+    assert client.post(f"/api/support/tickets/{real_ticket}/claim", headers=ha).status_code == 404
+    assert client.get(f"/api/support/tickets/{real_ticket}/brief", headers=ha).status_code == 404
+    pings = client.get("/api/dev/history", headers=ha, params={"channel_type": 1, "channel_id": "mandi-mitra"}).json()
+    assert not any(str(real_ticket) in str(m["content"]) and "Real Buyer" in str(m["content"]) for m in pings)
+
+    s = get_settings()
+    monkeypatch.setattr(s, "support_agent_phone", "9876500000")
+    monkeypatch.setattr(s, "support_agent_pin", "135790")
+    with Session(engine) as session:
+        asyncio.run(services.bootstrap(session))
+    hp, _ = login(client, "9876500000", "135790")
+    assert real_ticket in [t["id"] for t in client.get("/api/support/tickets", headers=hp).json()]
+    assert client.post(f"/api/support/tickets/{real_ticket}/claim", headers=hp).json()["status"] == "assigned"
+    assert client.get(f"/api/support/tickets/{real_ticket}/brief", headers=hp).status_code == 200
+    assert login(client, "9000000000", "2468")  # demo desk PIN unchanged for judges
+
+
+def test_short_private_agent_pin_is_ignored(monkeypatch):
+    from sqlmodel import Session
+    from app import services
+    from app.config import get_settings
+    from app.db import engine
+    from app.models import User
+
+    s = get_settings()
+    monkeypatch.setattr(s, "support_agent_phone", "9876511111")
+    monkeypatch.setattr(s, "support_agent_pin", "1234")
+    with Session(engine) as session:
+        asyncio.run(services.bootstrap(session))
+        assert session.exec(__import__("sqlmodel").select(User).where(User.phone == "9876511111")).first() is None
+
+
+def test_demo_and_real_users_never_meet(client):
+    hrf, realf = _register(client, "9123400002", "farmer", "Real Farmer")
+    li = client.post("/api/listings", headers=hrf, json={"crop": "onion", "quantity_kg": 100, "price_per_kg": 22}).json()
+    hdb, _ = login(client, "9000000002")
+    assert li["id"] not in [x["id"] for x in client.get("/api/listings", headers=hdb).json()]
+    assert client.post(f"/api/listings/{li['id']}/enquire", headers=hdb).status_code == 404
+    hrb, _ = _register(client, "9123400003", "buyer", "Real Buyer Two", "en")
+    seen = client.get("/api/listings", headers=hrb).json()
+    assert li["id"] in [x["id"] for x in seen] and not any(x["seller"]["id"].startswith("u_demo") for x in seen)
+    deal = client.post(f"/api/listings/{li['id']}/enquire", headers=hrb).json()["dealId"]
+    assert deal
+
+    hdt, _ = login(client, "9000000003")
+    req = client.post("/api/requests", headers=hdt, json={"crop": "onion", "quantity_kg": 50}).json()
+    pings = client.get("/api/dev/history", headers=hrf, params={"channel_type": 1, "channel_id": "mandi-mitra"}).json()
+    assert not any("Sunita" in str(m["content"]) for m in pings)  # demo request never pings a real farmer
+    assert req["id"] not in [r["id"] for r in client.get("/api/requests", headers=hrf).json()]
+    me = client.patch("/api/auth/me", headers=hdb, json={}).json()
+    assert me["demo"] is True and client.patch("/api/auth/me", headers=hrb, json={}).json()["demo"] is False

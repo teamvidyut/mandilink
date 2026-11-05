@@ -10,6 +10,7 @@ export interface Me {
   district: string;
   phone: string;
   avatarUrl: string;
+  demo?: boolean;
 }
 
 export interface SessionPayload {

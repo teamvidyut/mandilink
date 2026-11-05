@@ -93,7 +93,9 @@ Open **two browser windows**, one normal and one incognito. On the welcome scree
 | Farmer, Bengali | 9000000001 | 1234 |
 | Buyer, English | 9000000002 | 1234 |
 | Trader, Hindi | 9000000003 | 1234 |
-| Support agent | 9000000000 | 2468 |
+| Support desk (demo) | 9000000000 | 2468 |
+
+**Demo accounts are a sandbox.** They only see and trade with each other, and the demo support desk only sees demo users' tickets, so a public demo login can never read or contact real users. Real tickets are handled by a private agent account, enabled with `SUPPORT_AGENT_PHONE` and `SUPPORT_AGENT_PIN` (6+ digits) in the server environment.
 
 > With no Nexconn keys in `.env`, the app runs in **demo mode**: a yellow banner shows, and chat goes through a local WebSocket stand-in. Use it only to try the UI. **Your submission must run with real Nexconn keys.**
 

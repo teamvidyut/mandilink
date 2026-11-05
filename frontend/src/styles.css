@@ -732,3 +732,4 @@ legend { font-weight: 600; font-size: var(--step--1); color: var(--ink-2); margi
 .send-btn.rec-stop { background: var(--chilli); color: #fff; box-shadow: 0 4px 14px rgba(199,55,47,.35); }
 .send-btn.voice-rec { background: linear-gradient(180deg, var(--paddy), #256B42); }
 .msg.mine .tr-state, .msg.mine .tr-toggle { color: rgba(255,255,255,.8); }
+.demo-desk-note { margin: 0 4px 10px; padding: 8px 12px; border-radius: var(--r-sm); background: var(--mustard-soft); color: var(--mustard-ink); font-size: var(--step--1); }

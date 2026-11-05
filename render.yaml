@@ -40,5 +40,10 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
+      # Private support desk for real users (optional; PIN needs 6+ digits)
+      - key: SUPPORT_AGENT_PHONE
+        sync: false
+      - key: SUPPORT_AGENT_PIN
+        sync: false
       - key: CORS_ORIGINS
         value: ""

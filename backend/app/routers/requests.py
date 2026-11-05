@@ -15,7 +15,7 @@ from ..db import get_session
 from ..lang import CROP_DISPLAY, crop_name
 from ..models import BuyRequest, Listing, User
 from ..security import current_user
-from ..services import log_event, notify_request, open_deal, trust, trust_many
+from ..services import log_event, notify_request, open_deal, same_world, trust, trust_many, world_filter
 
 router = APIRouter(prefix="/api/requests", tags=["requests"])
 
@@ -64,7 +64,8 @@ async def request_out(session: Session, r: BuyRequest, viewer: User, trusts: dic
 @router.get("")
 async def list_requests(mine: bool = False, user: User = Depends(current_user), session: Session = Depends(get_session)):
     q = select(BuyRequest)
-    q = q.where(BuyRequest.buyer_id == user.id) if mine else q.where(BuyRequest.status == "open")
+    q = q.where(BuyRequest.buyer_id == user.id) if mine else q.where(
+        BuyRequest.status == "open", world_filter(BuyRequest.buyer_id, user.id))
     rows = session.exec(q.order_by(col(BuyRequest.created_at).desc()).limit(50)).all()
     buyers = list({r.buyer_id for r in rows})
     if buyers:
@@ -97,7 +98,7 @@ async def respond(request_id: int, body: RespondIn, user: User = Depends(current
                   session: Session = Depends(get_session)):
     """Farmer offers one of their listings: opens a deal room with the buyer."""
     req = session.get(BuyRequest, request_id)
-    if not req or req.status != "open":
+    if not req or req.status != "open" or not same_world(user.id, req.buyer_id):
         raise HTTPException(404, "This request is closed")
     li = session.get(Listing, body.listing_id)
     if not li or li.seller_id != user.id or li.status != "active":
