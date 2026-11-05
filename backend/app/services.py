@@ -6,7 +6,7 @@ import logging
 import secrets
 from datetime import datetime, timezone
 
-from sqlmodel import Session, func, select
+from sqlmodel import Session, col, func, select
 
 from .config import get_settings
 from .lang import LANG_NAMES, crop_name
@@ -151,22 +151,45 @@ def deal_card(deal: Deal, listing: Listing) -> dict:
 # ---------------------------------------------------------------- trust
 def trust(session: Session, user_id: str) -> dict:
     """Trust score shown next to every trader: completed deals + star rating."""
-    agg = session.exec(select(func.avg(Review.stars), func.count()).select_from(Review).where(Review.to_user == user_id)).one()
-    done = session.exec(
-        select(func.count()).select_from(Deal).where(
-            (Deal.seller_id == user_id) | (Deal.buyer_id == user_id),
-            Deal.status.in_(["agreed", "completed"]),  # type: ignore[attr-defined]
-        )
-    ).one()
-    u = session.get(User, user_id)
-    rating = round(float(agg[0]), 1) if agg[0] else None
-    deals = int(done)
-    reviews = int(agg[1])
-    badge = "top" if rating and rating >= 4.5 and reviews >= 3 else "trusted" if deals >= 1 else "new"
-    return {
-        "rating": rating, "reviews": reviews, "deals": deals, "badge": badge,
-        "since": int(u.created_at.timestamp() * 1000) if u else None,
+    return trust_many(session, [user_id])[user_id]
+
+
+def trust_many(session: Session, user_ids: list[str]) -> dict[str, dict]:
+    """Trust for several traders in 3 queries (not 3 per trader): pages that list
+    many sellers stay fast even when the database is far from the web server."""
+    ids = list(dict.fromkeys(u for u in user_ids if u))
+    if not ids:
+        return {}
+    ratings = {
+        uid: (avg, n)
+        for uid, avg, n in session.exec(
+            select(Review.to_user, func.avg(Review.stars), func.count())
+            .where(col(Review.to_user).in_(ids)).group_by(Review.to_user)
+        ).all()
     }
+    deals: dict[str, int] = {}
+    closed = session.exec(
+        select(Deal.buyer_id, Deal.seller_id).where(
+            col(Deal.status).in_(["agreed", "completed"]),
+            col(Deal.buyer_id).in_(ids) | col(Deal.seller_id).in_(ids),
+        )
+    ).all()
+    for buyer_id, seller_id in closed:
+        for uid in {buyer_id, seller_id}:
+            if uid in ids:
+                deals[uid] = deals.get(uid, 0) + 1
+    since = {u.id: u.created_at for u in session.exec(select(User).where(col(User.id).in_(ids))).all()}
+    out = {}
+    for uid in ids:
+        avg, n = ratings.get(uid, (None, 0))
+        rating = round(float(avg), 1) if avg else None
+        done, reviews = deals.get(uid, 0), int(n)
+        badge = "top" if rating and rating >= 4.5 and reviews >= 3 else "trusted" if done >= 1 else "new"
+        out[uid] = {
+            "rating": rating, "reviews": reviews, "deals": done, "badge": badge,
+            "since": int(since[uid].timestamp() * 1000) if uid in since else None,
+        }
+    return out
 
 
 def receipt(session: Session, deal: Deal, listing: Listing) -> dict:
@@ -283,7 +306,7 @@ async def post_deal_card(deal: Deal, listing: Listing) -> None:
 
 
 __all__ = [
-    "trust", "receipt", "notify_request",
+    "trust", "trust_many", "receipt", "notify_request",
     "BOT_ID", "GROUP", "bootstrap", "join_default_rooms", "open_deal", "escalate", "claim_ticket",
     "resolve_ticket", "deal_card", "post_deal_card", "log_event", "listing_card", "new_id",
 ]

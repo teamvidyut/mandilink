@@ -150,35 +150,40 @@ def metrics(session: Session = Depends(get_session)):
     # Demo accounts (ids "u_demo_*") never count as traction.
     real_user = ~col(User.id).startswith("u_demo")
     real_event = ~col(Event.user_id).startswith("u_demo")
-    people = select(func.count()).select_from(User).where(col(User.role).in_(["farmer", "buyer"]), real_user)
 
-    def count(kind: str, since: datetime | None = None) -> int:
-        q = select(func.count()).select_from(Event).where(Event.kind == kind, real_event)
-        if since:
-            q = q.where(Event.created_at >= since)
-        return int(session.exec(q).one())
+    # Few grouped queries instead of ~50 small ones (the database may be far from the server).
+    by_kind = dict(session.exec(
+        select(Event.kind, func.count()).where(real_event).group_by(Event.kind)).all())
 
-    active_7d = session.exec(
-        select(func.count(func.distinct(Event.user_id))).where(Event.created_at >= week, Event.kind == "message_sent", real_event)
-    ).one()
+    def count(kind: str) -> int:
+        return int(by_kind.get(kind, 0))
+
+    since14 = datetime(now.year, now.month, now.day, tzinfo=timezone.utc) - timedelta(days=13)
+    recent = session.exec(select(Event.user_id, Event.created_at).where(
+        Event.kind == "message_sent", Event.created_at >= since14, real_event)).all()
+    per_day: dict[str, list] = {}
+    active_7d_ids = set()
+    for uid, at in recent:
+        at = at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+        per_day.setdefault(at.date().isoformat(), []).append(uid)
+        if at >= week:
+            active_7d_ids.add(uid)
+    active_7d = len(active_7d_ids)
     series = []
     for i in range(13, -1, -1):
-        day = (now - timedelta(days=i)).date()
-        start = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
-        end = start + timedelta(days=1)
-        msgs = session.exec(select(func.count()).select_from(Event).where(
-            Event.kind == "message_sent", Event.created_at >= start, Event.created_at < end, real_event)).one()
-        users = session.exec(select(func.count(func.distinct(Event.user_id))).where(
-            Event.kind == "message_sent", Event.created_at >= start, Event.created_at < end, real_event)).one()
-        series.append({"date": day.isoformat(), "messages": int(msgs), "activeUsers": int(users)})
+        day = (now - timedelta(days=i)).date().isoformat()
+        rows = per_day.get(day, [])
+        series.append({"date": day, "messages": len(rows), "activeUsers": len(set(rows))})
     ratings = session.exec(select(func.avg(Feedback.rating), func.count()).select_from(Feedback).where(
         ~col(Feedback.user_id).startswith("u_demo"))).one()
     closed = session.exec(select(Deal).where(col(Deal.status).in_(["agreed", "completed"]),
                                              ~col(Deal.buyer_id).startswith("u_demo"))).all()
     gmv = sum((d.proposed_qty_kg or 0) * (d.proposed_price_per_kg or 0) for d in closed)
     kg = sum(d.proposed_qty_kg or 0 for d in closed)
-    langs = {lg: int(session.exec(select(func.count()).select_from(User).where(
-        User.language == lg, col(User.role).in_(["farmer", "buyer"]), real_user)).one()) for lg in ("bn", "hi", "en")}
+    people_rows = session.exec(select(User.role, User.language, func.count()).where(
+        col(User.role).in_(["farmer", "buyer"]), real_user).group_by(User.role, User.language)).all()
+    langs = {lg: sum(n for _, l2, n in people_rows if l2 == lg) for lg in ("bn", "hi", "en")}
+    by_role = {r: sum(n for r2, _, n in people_rows if r2 == r) for r in ("farmer", "buyer")}
     trade_rating = session.exec(select(func.avg(Review.stars), func.count()).select_from(Review).where(
         ~col(Review.from_user).startswith("u_demo"))).one()
     return {
@@ -190,9 +195,9 @@ def metrics(session: Session = Depends(get_session)):
         "languages": langs,
         "tradeRating": round(float(trade_rating[0]), 2) if trade_rating[0] else None,
         "tradeReviews": int(trade_rating[1]),
-        "users": int(session.exec(people).one()),
-        "farmers": int(session.exec(select(func.count()).select_from(User).where(User.role == "farmer", real_user)).one()),
-        "buyers": int(session.exec(select(func.count()).select_from(User).where(User.role == "buyer", real_user)).one()),
+        "users": by_role["farmer"] + by_role["buyer"],
+        "farmers": by_role["farmer"],
+        "buyers": by_role["buyer"],
         "activeUsers7d": int(active_7d),
         "messages": count("message_sent"),
         "translations": count("translation"),

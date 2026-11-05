@@ -14,7 +14,7 @@ from ..lang import CROP_DISPLAY, CROPS, crop_name
 from ..models import Deal, Listing, Photo, Review, User
 from ..nexconn import MSG_NOTICE, nexconn
 from ..security import current_user
-from ..services import BOT_ID, deal_card, log_event, new_id, now, open_deal, post_deal_card, receipt, trust
+from ..services import BOT_ID, deal_card, log_event, new_id, now, open_deal, post_deal_card, receipt, trust, trust_many
 
 router = APIRouter(prefix="/api", tags=["market"])
 
@@ -30,9 +30,10 @@ class ListingIn(BaseModel):
     photo_url: str = Field(default="", max_length=500, pattern=r"^(/api/photos/[A-Za-z0-9_]+|https://\S+)?$")
 
 
-async def listing_out(session: Session, li: Listing) -> dict:
+async def listing_out(session: Session, li: Listing, trusts: dict[str, dict] | None = None) -> dict:
     seller = session.get(User, li.seller_id)
     info = await mandi.get_price(li.crop)
+    seller_trust = (trusts or {}).get(li.seller_id) or (trust(session, seller.id) if seller else None)
     return {
         "id": li.id,
         "crop": li.crop,
@@ -47,7 +48,7 @@ async def listing_out(session: Session, li: Listing) -> dict:
         "status": li.status,
         "createdAt": int(li.created_at.timestamp() * 1000),
         "seller": {"id": seller.id, "name": seller.name, "district": seller.district, "language": seller.language,
-                   "trust": trust(session, seller.id)}
+                   "trust": seller_trust}
         if seller else None,
         "mandi": info.to_dict() if info else None,
         "fairness": mandi.fairness(li.price_per_kg, info) if info else None,
@@ -103,7 +104,11 @@ async def listings(
     rows = list(session.exec(q.order_by(order).limit(200 if search else limit)).all())
     if search:
         rows = [li for li in rows if _matches(session, li, search)][:limit]
-    out = [await listing_out(session, li) for li in rows]
+    sellers = {li.seller_id for li in rows}
+    if sellers:  # one query loads every seller into the session's identity map
+        session.exec(select(User).where(col(User.id).in_(sellers))).all()
+    trusts = trust_many(session, list(sellers))
+    out = [await listing_out(session, li, trusts) for li in rows]
     if sort == "fair":
         rank = {"low": 0, "fair": 1, "high": 2}
         out.sort(key=lambda r: rank.get(r["fairness"], 3))

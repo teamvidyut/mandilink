@@ -15,7 +15,7 @@ from ..db import get_session
 from ..lang import CROP_DISPLAY, crop_name
 from ..models import BuyRequest, Listing, User
 from ..security import current_user
-from ..services import log_event, notify_request, open_deal, trust
+from ..services import log_event, notify_request, open_deal, trust, trust_many
 
 router = APIRouter(prefix="/api/requests", tags=["requests"])
 
@@ -32,7 +32,7 @@ class RespondIn(BaseModel):
     listing_id: int
 
 
-async def request_out(session: Session, r: BuyRequest, viewer: User) -> dict:
+async def request_out(session: Session, r: BuyRequest, viewer: User, trusts: dict[str, dict] | None = None) -> dict:
     buyer = session.get(User, r.buyer_id)
     info = await mandi.get_price(r.crop)
     mine = []
@@ -54,7 +54,7 @@ async def request_out(session: Session, r: BuyRequest, viewer: User) -> dict:
         "status": r.status,
         "notified": r.notified,
         "createdAt": int(r.created_at.timestamp() * 1000),
-        "buyer": {"id": buyer.id, "name": buyer.name, "district": buyer.district, "trust": trust(session, buyer.id)}
+        "buyer": {"id": buyer.id, "name": buyer.name, "district": buyer.district, "trust": (trusts or {}).get(buyer.id) or trust(session, buyer.id)}
         if buyer else None,
         "mandi": info.to_dict() if info else None,
         "myMatchingListings": mine,
@@ -66,7 +66,11 @@ async def list_requests(mine: bool = False, user: User = Depends(current_user), 
     q = select(BuyRequest)
     q = q.where(BuyRequest.buyer_id == user.id) if mine else q.where(BuyRequest.status == "open")
     rows = session.exec(q.order_by(col(BuyRequest.created_at).desc()).limit(50)).all()
-    return [await request_out(session, r, user) for r in rows]
+    buyers = list({r.buyer_id for r in rows})
+    if buyers:
+        session.exec(select(User).where(col(User.id).in_(buyers))).all()
+    trusts = trust_many(session, buyers)
+    return [await request_out(session, r, user, trusts) for r in rows]
 
 
 @router.post("")
