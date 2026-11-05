@@ -104,14 +104,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       .catch(() => missing.forEach((id) => requested.current.delete(id)));
   }, []);
 
+  // Only the newest response may update the list: parallel refreshes can finish out of order,
+  // and a late, older response would drop a deal that was just opened.
+  const convSeq = useRef(0);
   const refreshConversations = useCallback(async () => {
     if (!getSessionToken()) return;
+    const seq = ++convSeq.current;
     try {
-      setConversations(await api<Conversation[]>('/api/conversations'));
+      const list = await api<Conversation[]>('/api/conversations');
+      if (seq === convSeq.current) setConversations(list);
     } catch {
       /* keep the previous list */
     }
   }, []);
+  // Bursts of cards (e.g. offline messages delivered on connect) trigger one refresh, not dozens.
+  const convTimer = useRef(0);
+  const refreshSoon = useCallback(() => {
+    window.clearTimeout(convTimer.current);
+    convTimer.current = window.setTimeout(() => void refreshConversations(), 400);
+  }, [refreshConversations]);
 
   const signIn = useCallback(
     async (payload: SessionPayload) => {
@@ -128,7 +139,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (m.senderUserId !== payload.user.id && activeRef.current !== m.channelId) {
           setUnread((cur) => ({ ...cur, [m.channelId]: (cur[m.channelId] || 0) + 1 }));
         }
-        if (m.messageType.startsWith('ML:')) void refreshConversations();
+        if (m.messageType.startsWith('ML:') && m.messageType !== 'ML:Typing') refreshSoon();
       });
       setTransport(tr);
       await refreshConversations();
@@ -139,7 +150,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         toast(String((e as Error).message));
       }
     },
-    [refreshConversations, toast],
+    [refreshConversations, refreshSoon, toast],
   );
 
   const signOut = useCallback(async () => {

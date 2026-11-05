@@ -26,9 +26,12 @@ function useBrowserTranslated() {
 }
 
 function Nav() {
-  const { t, me, unread } = useStore();
+  const { t, me, unread, conversations } = useStore();
   const loc = useLocation();
-  const total = Object.entries(unread).reduce((n, [k, v]) => (k === 'mandi-mitra' ? n : n + v), 0);
+  // Count only chats this deployment lists: Nexconn may also deliver offline messages from
+  // channels of another deployment that shares the app (e.g. local testing with demo users).
+  const known = new Set(conversations.map((c) => c.channelId));
+  const total = Object.entries(unread).reduce((n, [k, v]) => (k === 'mandi-mitra' || !known.has(k) ? n : n + v), 0);
   const items =
     me?.role === 'agent'
       ? [
