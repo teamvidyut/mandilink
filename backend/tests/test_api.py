@@ -509,3 +509,12 @@ def test_demo_and_real_users_never_meet(client):
     assert req["id"] not in [r["id"] for r in client.get("/api/requests", headers=hrf).json()]
     me = client.patch("/api/auth/me", headers=hdb, json={}).json()
     assert me["demo"] is True and client.patch("/api/auth/me", headers=hrb, json={}).json()["demo"] is False
+
+
+def test_mitra_reply_never_shows_internal_field_names():
+    from app.agent import _clean
+    raw = ("Asking ₹18/kg is a fair price. For cauliflower, the reference estimate is ₹10 to ₹20/kg, "
+           "with a typical price of ₹15/kg (Eastern India avg., live=false).")
+    out = _clean(raw)
+    assert "live" not in out and "(Eastern India avg.)" in out and out.startswith("Asking")
+    assert _clean("Typical ₹15/kg (live=true)") == "Typical ₹15/kg"

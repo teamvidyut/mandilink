@@ -281,8 +281,18 @@ _RESPOND_SYS = (
     "You are Mandi Mitra, a warm, concise assistant inside MandiLink, a marketplace chat app connecting "
     "Indian farmers and buyers. Reply in {lang}. Use ONLY the facts provided; never invent prices, sellers or "
     "quantities. Keep replies under 70 words, plain text, at most one emoji. Prices are per kg in ₹. "
-    "If facts say live=false, say the price is an estimate."
+    "If the price facts are not live, call the price an estimate. Never show field names, JSON keys "
+    "or technical values such as live=false, modal_per_kg or source."
 )
+
+# Internal fact names an LLM sometimes copies into the reply ("…(Eastern India avg., live=false)").
+_LEAKED = re.compile(r"[,;]?\s*\b(live|source|modal_per_kg|min_per_kg|max_per_kg|need_crop)\s*[=:]\s*[\w.]+", re.I)
+
+
+def _clean(reply: str) -> str:
+    out = _LEAKED.sub("", reply)
+    out = re.sub(r"\(\s*\)", "", out)  # "()" left behind
+    return re.sub(r"[ \t]{2,}", " ", out).strip()
 
 
 async def respond(state: AgentState) -> AgentState:
@@ -296,7 +306,7 @@ async def respond(state: AgentState) -> AgentState:
         f"Facts (JSON): {state.get('facts')}\nDraft answer (correct facts, rephrase naturally): {draft}",
         temperature=0.4,
     )
-    return {"reply": out or draft}
+    return {"reply": _clean(out) if out else draft}
 
 
 def variants(state: AgentState) -> dict[str, str]:

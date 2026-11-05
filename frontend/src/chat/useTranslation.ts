@@ -23,7 +23,14 @@ export function translate(text: string, target: Lang, sourceHint?: Lang): Promis
   const key = `${target}|${sourceHint || ''}|${text}`;
   let p = cache.get(key);
   if (!p) {
-    p = api<TranslationResult>('/api/translate', { method: 'POST', json: { text, target, source_hint: sourceHint } });
+    // A request can stall on a busy free-tier server: give up after 25 s and try once more,
+    // so a message never stays stuck on "…" forever.
+    const once = () =>
+      Promise.race([
+        api<TranslationResult>('/api/translate', { method: 'POST', json: { text, target, source_hint: sourceHint } }),
+        new Promise<never>((_, reject) => window.setTimeout(() => reject(new Error('translate timeout')), 25000)),
+      ]);
+    p = once().catch(() => once());
     p.catch(() => cache.delete(key));
     cache.set(key, p);
   }
