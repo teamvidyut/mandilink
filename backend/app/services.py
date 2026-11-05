@@ -27,6 +27,12 @@ ROOMS = [
 ]
 
 
+def channel_id(base: str) -> str:
+    """Nexconn channel id for this deployment (see Settings.channel_namespace)."""
+    ns = get_settings().channel_namespace.strip()
+    return f"{base}-{ns}" if ns else base
+
+
 def new_id(prefix: str) -> str:
     return f"{prefix}_{secrets.token_hex(5)}"
 
@@ -59,7 +65,8 @@ async def bootstrap(session: Session) -> None:
         session.add(agent)
         session.commit()
 
-    for rid, name, topic, emoji in ROOMS:
+    for base_id, name, topic, emoji in ROOMS:
+        rid = channel_id(base_id)
         if session.get(Room, rid) is None:
             try:
                 await nexconn.create_group(rid, name, BOT_ID, [])
@@ -100,7 +107,7 @@ def listing_card(listing: Listing, seller: User, price: dict | None) -> dict:
 
 
 async def open_deal(session: Session, buyer: User, listing: Listing, price: dict | None) -> Deal:
-    deal_id = f"deal_{listing.id}_{buyer.id}"
+    deal_id = channel_id(f"deal_{listing.id}_{buyer.id}")
     existing = session.get(Deal, deal_id)
     if existing:
         return existing

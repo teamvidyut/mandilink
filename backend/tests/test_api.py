@@ -402,3 +402,36 @@ def test_metrics_exclude_demo_listings_and_feedback(client):
     client.post("/api/feedback", headers=h, json={"rating": 1, "comment": "demo"})
     m = client.get("/api/metrics").json()
     assert m["listings"] == 0 and m["feedbackCount"] == 0 and "voiceNotes" in m
+
+
+def test_existing_nexconn_group_is_reused_and_namespace_applied(monkeypatch):
+    from app import services
+    from app.config import get_settings
+    from app.nexconn import GROUP_EXISTS, NexconnClient, NexconnError
+
+    c = NexconnClient()
+    monkeypatch.setattr(c.s, "nexconn_app_key", "k")
+    monkeypatch.setattr(c.s, "nexconn_app_secret", "s")
+    calls = []
+
+    async def fake_post(path, body):
+        calls.append(path)
+        if path.endswith("/create"):
+            raise NexconnError(GROUP_EXISTS, "group already exists")
+        return {"code": 0}
+
+    monkeypatch.setattr(c, "_post", fake_post)
+    asyncio.run(c.create_group("deal_9_u_x", "Deal", "mandi-mitra", ["u_a", "u_b"]))
+    assert calls == ["/v4/group-channel/create", "/v4/group-channel/join"]
+
+    async def other_error(path, body):
+        raise NexconnError(401, "bad signature")
+
+    monkeypatch.setattr(c, "_post", other_error)
+    with pytest.raises(NexconnError):
+        asyncio.run(c.create_group("deal_9_u_x", "Deal", "mandi-mitra", ["u_a"]))
+
+    monkeypatch.setattr(get_settings(), "channel_namespace", "live")
+    assert services.channel_id("deal_1_u_demo_buyer") == "deal_1_u_demo_buyer-live"
+    monkeypatch.setattr(get_settings(), "channel_namespace", "")
+    assert services.channel_id("room-veg-kolkata") == "room-veg-kolkata"

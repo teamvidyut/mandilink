@@ -22,6 +22,9 @@ services:
         value: https://api.sg-light-api.com
       - key: NEXCONN_BACKUP_API_HOST
         value: https://api-b.sg-light-api.com
+      # Own Nexconn room ids for this deployment (local dev shares the same Nexconn app).
+      - key: CHANNEL_NAMESPACE
+        value: live
       - key: LLM_PROVIDER
         value: gemini
       - key: GEMINI_API_KEY

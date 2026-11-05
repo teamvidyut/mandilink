@@ -39,6 +39,7 @@ MSG_NOTICE = "ML:Notice"
 MSG_VOICE = "ML:Voice"
 
 DIRECT = 1
+GROUP_EXISTS = 25409  # group-channel/create on an id that already exists
 GROUP = 3
 
 
@@ -145,10 +146,19 @@ class NexconnClient:
 
             hub.add_members(channel_id, [owner, *members])
             return
-        await self._post(
-            "/v4/group-channel/create",
-            {"channelId": channel_id, "name": name, "owner": owner, "userIds": members[:30]},
-        )
+        try:
+            await self._post(
+                "/v4/group-channel/create",
+                {"channelId": channel_id, "name": name, "owner": owner, "userIds": members[:30]},
+            )
+        except NexconnError as exc:
+            # The channel already exists on Nexconn (e.g. created by another deployment that
+            # shares this Nexconn app, or before the database was reset): make it idempotent
+            # by just adding the members.
+            if exc.code != GROUP_EXISTS:
+                raise
+            if members:
+                await self.join_group(channel_id, members[:30])
 
     async def join_group(self, channel_id: str, user_ids: list[str]) -> None:
         if self.demo_mode:

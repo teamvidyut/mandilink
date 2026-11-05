@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     nexconn_api_host: str = "https://api.sg-light-api.com"
     nexconn_backup_api_host: str = ""
 
+    # Optional suffix for Nexconn deal/room channel ids. Use a different value per deployment
+    # that shares one Nexconn app (e.g. "live" on Render), so each starts with clean rooms.
+    channel_namespace: str = ""
+
     # --- AI ---
     # llm_provider: "gemini" | "openai" (any OpenAI-compatible endpoint, e.g. Groq) | "none"
     llm_provider: str = "none"
