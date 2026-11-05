@@ -1,0 +1,9 @@
+{
+  "name": "MandiLink",
+  "short_name": "MandiLink",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#F4F6FB",
+  "theme_color": "#1F2A5C",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

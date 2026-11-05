@@ -1,0 +1,38 @@
+# One service: FastAPI serves the API and the built React app on the same URL.
+services:
+  - type: web
+    name: mandilink
+    runtime: python
+    plan: free
+    buildCommand: cd frontend && npm ci && npm run build && cd ../backend && pip install -r requirements.txt
+    startCommand: cd backend && python -m app.seed && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: NODE_VERSION
+        value: 20.18.0
+      - key: JWT_SECRET
+        generateValue: true
+      - key: NEXCONN_APP_KEY
+        sync: false
+      - key: NEXCONN_APP_SECRET
+        sync: false
+      - key: NEXCONN_API_HOST
+        value: https://api.sg-light-api.com
+      - key: NEXCONN_BACKUP_API_HOST
+        value: https://api-b.sg-light-api.com
+      - key: LLM_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: GEMINI_FALLBACK_MODEL
+        value: gemini-flash-lite-latest
+      - key: DATAGOV_API_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        value: ""

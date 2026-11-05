@@ -1,0 +1,16 @@
+node_modules/
+frontend/dist/
+__pycache__/
+*.pyc
+.env
+*.db
+.pytest_cache/
+.venv/
+.venv-*/
+.claude/settings.local.json
+mandilink.zip
+# Private: never published to GitHub (kept on disk only)
+CLAUDE.md
+.claude/
+docs/
+*.tsbuildinfo
